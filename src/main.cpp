@@ -5,6 +5,9 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
+#include <sstream>
+#include <algorithm>
 #include <cstdlib>
 #include <windows.h>
 
@@ -220,31 +223,111 @@ static void PerformAnalysis(const int jobNum, Job jobLine[], double &TT_aver, do
     TTP_aver = TTP_sum / jobNum;
 }
 
-static void printTime(int minutes) {    //将总分钟输出为 H:MM 格式，分钟补零
-    cout << minutes / 60 << ":";
+static string timeStr(int minutes) {    //将总分钟格式化为 H:MM 字符串，分钟补零
+    string s = to_string(minutes / 60) + ":";
     int m = minutes % 60;
-    if (m < 10) cout << '0';
-    cout << m;
+    if (m < 10) s += '0';
+    return s + to_string(m);
+}
+
+static string doubleStr(double v) {    //按默认精度将浮点数转为字符串，与直接输出保持一致
+    ostringstream oss;
+    oss << v;
+    return oss.str();
+}
+
+static int displayWidth(const string& s) {    //计算字符串在控制台中的显示宽度，中文及全角字符按 2 列计
+    int width = 0;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = (unsigned char)s[i];
+        int len = 1;
+        unsigned int cp = c;
+        if ((c & 0x80) == 0) { len = 1; cp = c; }
+        else if ((c & 0xE0) == 0xC0) { len = 2; cp = c & 0x1Fu; }
+        else if ((c & 0xF0) == 0xE0) { len = 3; cp = c & 0x0Fu; }
+        else if ((c & 0xF8) == 0xF0) { len = 4; cp = c & 0x07u; }
+        else { i++; width++; continue; }
+        for (int k = 1; k < len; k++)
+            cp = (cp << 6) | ((unsigned char)s[i + k] & 0x3Fu);
+        bool wide =    //East Asian 全角/宽字符区间
+            (cp >= 0x1100 && (cp <= 0x115F || cp == 0x2329 || cp == 0x232A ||
+             (cp >= 0x2E80 && cp <= 0xA4CF && cp != 0x303F) ||
+             (cp >= 0xAC00 && cp <= 0xD7A3) ||
+             (cp >= 0xF900 && cp <= 0xFAFF) ||
+             (cp >= 0xFE10 && cp <= 0xFE19) ||
+             (cp >= 0xFE30 && cp <= 0xFE6F) ||
+             (cp >= 0xFF00 && cp <= 0xFF60) ||
+             (cp >= 0xFFE0 && cp <= 0xFFE6)));
+        width += wide ? 2 : 1;
+        i += len;
+    }
+    return width;
+}
+
+static void printCentered(const string& s, int width) {    //将字符串在指定宽度内居中对齐输出
+    int w = displayWidth(s);
+    int left = (width - w) / 2;
+    cout << string(left, ' ') << s << string(width - w - left, ' ');
 }
 
 static void Print(const int jobNum, Job jobLine[], double TT_aver, double TTP_aver) {
-    cout << "|===========================================================================================================" << endl;
-    cout << "| 作业\t" << "到达时间\t" << "估计运行时间（min）\t" << "开始时间\t" << "结束时间\t" << "周转时间（min）\t" << "带权周转时间|" << endl;
-    cout << "|-----------------------------------------------------------------------------------------------------------" << endl;
+    const string headers[] = {"作业", "到达时间", "估计运行时间（min）", "开始时间", "结束时间", "周转时间（min）", "带权周转时间"};
+    constexpr int cols = 7;
+
+    vector<vector<string>> rows(jobNum);    //将所有待打印数据统一转为字符串
     for (int i = 0; i < jobNum; i++) {
-        cout << "| JOB" << i + 1 << "\t ";
-        printTime(jobLine[i].enterTime);
-        cout << "\t\t     " << jobLine[i].estimatedRunningTime << "\t\t\t ";
-        printTime(jobLine[i].startTime);
-        cout << "\t\t ";
-        printTime(jobLine[i].endTime);
-        cout << "\t\t   " << jobLine[i].TurnaroundTime << "\t\t    "
-             << jobLine[i].TurnaroundTime_withPower << endl;
-        cout << "|-----------------------------------------------------------------------------------------------------------" << endl;
+        rows[i] = {
+            "JOB" + to_string(i + 1),
+            timeStr(jobLine[i].enterTime),
+            to_string(jobLine[i].estimatedRunningTime),
+            timeStr(jobLine[i].startTime),
+            timeStr(jobLine[i].endTime),
+            to_string(jobLine[i].TurnaroundTime),
+            doubleStr(jobLine[i].TurnaroundTime_withPower)
+        };
     }
-    cout << "| 平均周转时间: " << TT_aver << endl;
-    cout << "| 平均带权周转时间: " << TTP_aver << endl;
-    cout << "|===========================================================================================================" << endl;
+
+    int colW[cols]{};    //每列取表头与所有数据单元格的最大显示宽度
+    for (int c = 0; c < cols; c++) {
+        colW[c] = displayWidth(headers[c]);
+        for (int i = 0; i < jobNum; i++)
+            colW[c] = max(colW[c], displayWidth(rows[i][c]));
+    }
+
+    int totalWidth = 1;    //整张表的显示宽度：起始 '|' + 每列(左右各 1 空格 + 分隔 '|')
+    for (int c = 0; c < cols; c++) totalWidth += colW[c] + 3;
+
+    auto border = [&](char corner) {    //打印边框分隔线
+        cout << corner;
+        for (int c = 0; c < cols; c++)
+            cout << string(colW[c] + 2, '-') << corner;
+        cout << endl;
+    };
+
+    auto printRow = [&](const vector<string>& cells) {    //打印一行居中对齐的单元格
+        cout << '|';
+        for (int c = 0; c < cols; c++) {
+            cout << ' ';
+            printCentered(cells[c], colW[c]);
+            cout << " |";
+        }
+        cout << endl;
+    };
+
+    auto printSpanRow = [&](const string& text) {    //打印跨整行的说明文字（左对齐，右侧补空格闭合边框）
+        int inner = totalWidth - 2;
+        cout << "| " << text << string(inner - 1 - displayWidth(text), ' ') << "|" << endl;
+    };
+
+    border('+');
+    printRow(vector<string>(headers, headers + cols));
+    border('+');
+    for (int i = 0; i < jobNum; i++)
+        printRow(rows[i]);
+    border('+');
+    printSpanRow("平均周转时间: " + doubleStr(TT_aver));
+    printSpanRow("平均带权周转时间: " + doubleStr(TTP_aver));
+    border('+');
 }
 
 
