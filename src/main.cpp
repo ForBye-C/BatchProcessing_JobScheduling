@@ -359,7 +359,7 @@ int main() {
         cout << "估计运行时间:";    //接收作业的估计运行时间
         cin >> jobLine[i].estimatedRunningTime;
         if (JS == "HPF" || PS == "HPF") {    //若采用最高优先级算法则还需记录作业的优先级
-            cout << "优先级（数字越小优先级越高）:";
+            cout << "优先数（数字越小优先级越高）:";
             cin >> jobLine[i].priority;
         }
     }
